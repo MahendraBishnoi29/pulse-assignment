@@ -1,187 +1,209 @@
 # Pulse
 
-> **A full-stack video processing, analysis, and streaming platform.**
+A full-stack video processing, analysis, and streaming platform with direct-to-S3 uploads, secure playback, and automated thumbnail generation.
 
-Pulse is a robust, multi-tenant web application designed for secure video ingestion, automated content sensitivity analysis, and optimized HTTP-range streaming. Built with a modern **React 19** frontend and an **Express 5** + **MongoDB** backend, it leverages **FFmpeg** for algorithmic video inspection and **Socket.io** for real-time processing feedback.
+Pulse is a multi-tenant application designed for secure video ingestion, automated content sensitivity analysis, and fast streaming. The frontend uploads directly to S3 via signed URLs, the backend manages metadata and processing, and the UI shows real-time progress through Socket.io updates.
 
----
+Highlights
 
-## 📑 Table of Contents
+- Direct-to-S3 uploads with signed URLs
+- Secure streaming via signed redirects
+- Automatic thumbnail generation with FFmpeg
+- Real-time processing progress
+- Multi-tenant RBAC with editor and admin roles
 
-1. [Architecture Overview](#-architecture-overview)
-2. [Assumptions & Design Decisions](#-assumptions-and-design-decisions)
-3. [User Manual](#-user-manual)
-4. [API Documentation](#-api-documentation)
-5. [Installation & Setup](#-installation-and-setup-guide)
+## Table of Contents
 
----
+1. Architecture Overview
+2. Key Design Decisions
+3. Feature Tour
+4. API Documentation
+5. Installation and Setup
+6. Operations Notes
+7. Roadmap
 
-## 🏗 Architecture Overview
+## Architecture Overview
 
-Pulse follows a classic Client-Server architecture enriched with bidirectional real-time communications and file-system level streaming optimizations.
+Pulse follows a client-server architecture with direct-to-S3 uploads and signed playback URLs.
 
-### Flow Diagram
+Flow
 
 ```text
 [ React Frontend ]
-       │
-       ├─ REST API (Uploads / Auth / Metadata) ───▶ [ Express 5 Server ]
-       │                                                   │
-       ├─ HTTP 206 (Chunked Video Streaming) ─────▶ [ Local Disk Storage ]
-       │                                                   │
-       └─ WebSockets (Real-time Progress) ◀───────▶ [ FFmpeg Processing Pipeline ]
-                                                           │
-                                                      [ MongoDB Atlas ]
+       |
+       | 1) Request signed upload URL
+       v
+[ Express 5 API ] -----------------------------.
+       |                                       |
+       | 2) Signed PUT URL                      |
+       v                                       |
+[ Browser PUT -> S3 (videos/) ]                |
+       |                                       |
+       | 3) Save metadata + start processing   |
+       v                                       |
+[ MongoDB ] <---- Processing Worker ----> [ FFmpeg + ffprobe ]
+       |                                       |
+       | 4) Signed GET URL for stream          |
+       '-------------------------------> [ S3 (videos/) ]
 ```
 
-### Core Technologies
+Core Technologies
 
-- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Context API, Vite and Socket.io Client.
-- **Backend**: Node.js, Express 5, Mongoose 9 (MongoDB), Socket.io, Multer, fluent-ffmpeg (with `ffmpeg-static`).
-- **Authorization**: JSON Web Tokens (JWT) & bcrypt.
+- Frontend: React 19, TypeScript, Tailwind CSS v4, Context API, Vite, Socket.io Client
+- Backend: Node.js, Express 5, Mongoose 9, Socket.io, AWS SDK v3, fluent-ffmpeg with ffmpeg-static and ffprobe-static
+- Auth: JWT + bcrypt
 
----
+## Key Design Decisions
 
-## 🧠 Assumptions and Design Decisions
+Direct-to-S3 uploads with signed URLs: reduces backend bandwidth, avoids large server buffers, and keeps the API focused on auth and metadata.
 
-During development, several engineering decisions were made to balance performance, scalability, and UX:
+Signed playback URLs: the API returns a 302 redirect to a short-lived signed S3 URL to keep buckets private while enabling secure streaming.
 
-1. **Deterministic Heuristic Analysis over heavy ML**:
-   - _Assumption_: Bootstrapping a full PyTorch/TensorFlow container for sensitivity analysis adds immense overhead.
-   - _Decision_: Built a deterministic scoring heuristic based on video metadata (duration, resolution, bitrate) and filename keyword hashing. This satisfies the functional "Sensitivity Analysis" requirement while keeping the architecture modular. This mocked pipeline can be swapped for a real ML microservice later seamlessly.
-2. **Context API over Redux**:
-   - _Decision_: Kept the frontend payload minimal by using React Context. Global state strictly governs JWT persistence (`AuthContext`), WebSocket lifecycles (`SocketContext`), and local caching of video arrays (`VideoContext`).
-3. **Optimized Video Streaming (HTTP 206)**:
-   - _Decision_: Sending entire 500MB video buffers over standard GET requests crashes memory. Handled routing via `fs.createReadStream` utilizing `Content-Range` chunking headers to allow HTML5 browsers to buffer and scrub perfectly.
-4. **Local Disk instead of S3/Cloud Storage**:
-   - _Decision_: Designed entirely on `fs` local disk storage (`/server/uploads`) to align with strict "no AWS" system requirements.
-5. **Real-time Pipeline Tracking**:
-   - _Decision_: Used targeted Socket.io `.join("user:{id}")` rooms. When the server processes FFmpeg stages natively, it pushes progress integers directly to the user's specific sub-socket, completely eliminating heavy frontend API polling.
+Server-side thumbnail generation: FFmpeg extracts a representative frame after upload, stores it in S3 under the same `videos/` prefix, and returns a signed `thumbnailUrl` for cards and poster images.
 
----
+Deterministic sensitivity analysis: lightweight heuristic scoring keeps the pipeline fast today and swappable for ML later.
 
-## 📖 User Manual
+Real-time progress via Socket.io: processing stages emit progress events without client polling.
 
-### Role-Based Access Control (RBAC)
+## Feature Tour
 
-When a user signs up, they are automatically granted `editor` privileges.
+- Multi-tenant library with role-based access control
+- Direct-to-S3 uploads with progress indicator
+- Streaming via signed S3 URL redirects
+- Automated thumbnail generation
+- Sensitivity analysis and warning overlay
+- Real-time processing progress
 
-- **Viewers**: Can only stream and view videos within their tenant.
-- **Editors**: Can upload new videos up to 500MB, edit metadata, and delete their own videos.
-- **Admins**: Bypass multi-tenant restrictions and can view/delete any video on the platform.
-
-### Standard Workflow
-
-1. **Sign Up**: Navigate to `/register` and create an account.
-2. **Dashboard**: Your video library will be empty. Click **Upload Video**.
-3. **Upload**: Drag-and-drop an `MP4`, `WebM`, or `OGG` file. Add a title.
-4. **Real-time Engine**: Once uploaded, the video enters a `processing` state. Standard metadata extraction and sensitivity algorithms will execute. Progress is shown in real-time.
-5. **Playback**: Once `processed`, click the video card. If the heuristic engine flagged the content, you will be met with a Blur/Warning overlay. Acknowledge the warning to begin streaming the media.
-
----
-
-## 🔌 API Documentation
+## API Documentation
 
 Base URL: `http://localhost:5001/api`
 
-### Auth Endpoints
+Auth
 
-| Method | Endpoint         | Description                   | Auth Required |
-| ------ | ---------------- | ----------------------------- | ------------- |
-| POST   | `/auth/register` | Register a new user           | ❌            |
-| POST   | `/auth/login`    | Authenticate and retrieve JWT | ❌            |
-| GET    | `/auth/me`       | Retrieve active user profile  | ✅            |
+| Method | Endpoint         | Description                   | Auth |
+| ------ | ---------------- | ----------------------------- | ---- |
+| POST   | `/auth/register` | Register a new user           | No   |
+| POST   | `/auth/login`    | Authenticate and retrieve JWT | No   |
+| GET    | `/auth/me`       | Retrieve active user profile  | Yes  |
 
-### Video Endpoints
+Videos
 
-| Method | Endpoint             | Description                            | Auth Required     |
-| ------ | -------------------- | -------------------------------------- | ----------------- |
-| POST   | `/videos`            | Upload a video (`multipart/form-data`) | ✅ (Editor/Admin) |
-| GET    | `/videos`            | Fetch paginated/filtered library       | ✅ (All roles)    |
-| GET    | `/videos/:id`        | Get single video metadata              | ✅ (All roles)    |
-| GET    | `/videos/:id/stream` | HTTP 206 chunked file stream           | ✅ (All roles)    |
-| DELETE | `/videos/:id`        | Deletes DB entry and local disk file   | ✅ (Editor/Admin) |
+| Method | Endpoint             | Description                                           | Auth |
+| ------ | -------------------- | ----------------------------------------------------- | ---- |
+| POST   | `/videos/upload-url` | Get a signed S3 upload URL                            | Yes  |
+| POST   | `/videos`            | Save upload metadata and start processing             | Yes  |
+| GET    | `/videos`            | List videos (includes signed `thumbnailUrl`)          | Yes  |
+| GET    | `/videos/:id`        | Get video metadata (includes signed `thumbnailUrl`)   | Yes  |
+| GET    | `/videos/:id/stream` | Redirect to a signed S3 URL for playback              | Yes  |
+| DELETE | `/videos/:id`        | Delete a video and its S3 object                      | Yes  |
 
----
+Notes
 
-## 🚀 Installation and Setup Guide
+- `/videos/upload-url` expects `filename`, `mimetype`, and `size`
+- `/videos` expects `title`, `description`, `objectKey`, `originalName`, `mimetype`, and `size`
+- Signed URLs are short-lived and should not be cached
 
-### Prerequisites
+## Installation and Setup
 
-- Node.js (v18 or higher)
-- pnpm (for frontend packages)
-- MongoDB Database URI (Atlas or Local)
+Prerequisites
 
-### 1. Database & Environment Configuration
+- Node.js v18+
+- pnpm
+- MongoDB URI (Atlas or local)
+- An S3 bucket with CORS enabled
 
-1. Navigate to `server/`:
-   ```bash
-   cd server
-   ```
-2. Setup environment variables by creating `.env`:
-   ```bash
-   PORT=5001
-   MONGO_URI=mongodb+srv://<your-cluster-url>
-   JWT_SECRET=super_secret_key_123
-   JWT_EXPIRES_IN=7d
-   ```
+Backend
 
-### 2. Start the Backend server
+1. Install deps
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Start the development server (automatically handles `ffmpeg-static` injection):
-   ```bash
-   npm run dev
-   ```
-   _The server will spin up on `http://localhost:5001`. The uploads directory is auto-generated._
+```bash
+cd server
+npm install
+```
 
-### 3. Start the Frontend Application
+2. Configure environment
 
-1. Open a new terminal and navigate to `client/`:
-   ```bash
-   cd client
-   ```
-2. Install dependencies:
-   ```bash
-   pnpm install
-   ```
-3. Start the Vite development build:
-   ```bash
-   pnpm run dev
-   ```
-   _The client will be running globally on `http://localhost:5173`._
+```bash
+PORT=5001
+MONGO_URI=mongodb+srv://<your-cluster-url>
+JWT_SECRET=super_secret_key_123
+JWT_EXPIRES_IN=7d
 
----
+AWS_REGION=ap-south-1
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_S3_BUCKET=your_bucket_name
 
-## 🔮 Scalability & Future Roadmap
+# Optional
+AWS_S3_ENDPOINT=
+AWS_S3_FORCE_PATH_STYLE=false
+S3_UPLOAD_URL_EXPIRES_IN=900
+S3_STREAM_URL_EXPIRES_IN=900
+S3_THUMBNAIL_URL_EXPIRES_IN=86400
+```
 
-To pivot **Pulse** from a powerful MVP into a globally distributed infrastructure, the following scaling strategies can be implemented:
+Note: `AWS_BUCKET_NAME` is also supported as a fallback alias.
 
-### 1. Cloud File Storage (AWS S3 / Google Cloud)
+3. Start API
 
-**How to implement:**
-Replace the local `multer.diskStorage` engine with `multer-s3`. When the Express endpoint receives the `.mp4` payload, it streams it directly into an S3 bucket rather than saving it to the active filesystem. The MongoDB model will simply save the S3 Object URL.
-_Benefit_: Unlocks infinite storage capacity, detaches storage states from the web servers allowing horizontal Node.js scaling, and secures data redundantly.
+```bash
+npm run dev
+```
 
-### 2. Video Compression & Transcoding (HLS/DASH)
+Frontend
 
-**How to implement:**
-Expand the FFmpeg processing worker (or use AWS Elastic Transcoder / MediaConvert) into a dedicated microservice. Upon upload, transcode the video into an **HLS (HTTP Live Streaming)** playlist containing `.m3u8` variant streams (1080p, 720p, 480p) instead of serving a raw static `.mp4`.
-_Benefit_: Provides **Adaptive Bitrate Streaming**. The `<VideoPlayer />` component will automatically drop to 480p if the user's internet connection slows down, completely eliminating buffering stalls.
+1. Install deps
 
-### 3. Caching Strategy (Redis)
+```bash
+cd client
+pnpm install
+```
 
-**How to implement:**
-Deploy **Redis** as an in-memory datastore. Wrap the `GET /api/videos` dashboard endpoints in a caching middleware. If the key `videos:user:{id}` exists, serve it directly from RAM; otherwise, query MongoDB and set the cache with a predefined TTL (Time To Live).
-_Benefit_: Drops database load by up to **90%** during peak traffic hours, dropping API latency times to sub `10ms` for frequent dashboard refreshes.
+2. Start client
 
-### 4. CDN Integration (Content Delivery Network)
+```bash
+pnpm run dev
+```
 
-**How to implement:**
-Hook up **Amazon CloudFront** or **Cloudflare** directly to the S3 bucket hosting the videos. Change the API to return the CDN domain URL for streaming rather than routing bytes through the Node.js Express server.
-_Benefit_: A user in Tokyo will stream the video from a localized Tokyo edge-server rather than requesting data across the world, slicing video latency drastically and saving core server bandwidth costs.
+Client runs at `http://localhost:5173` and the API at `http://localhost:5001`.
 
----
+## Operations Notes
+
+S3 CORS
+
+```json
+[
+  {
+    "AllowedHeaders": ["*"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedOrigins": ["http://localhost:5173"],
+    "ExposeHeaders": [
+      "ETag",
+      "Accept-Ranges",
+      "Content-Range",
+      "Content-Length"
+    ],
+    "MaxAgeSeconds": 3000
+  }
+]
+```
+
+Bucket Policy
+
+Grant the server IAM user access to both video and thumbnail objects:
+
+- `arn:aws:s3:::<bucket>/videos/*`
+
+Thumbnails are stored as `videos/{userId}/{videoId}-thumb.jpg` in the same prefix as video objects.
+
+FFmpeg / ffprobe
+
+This project uses `ffmpeg-static` and `ffprobe-static`. No system-level installation is required.
+
+## Roadmap
+
+1. HLS/DASH adaptive streaming
+2. Background queue for processing (BullMQ)
+3. CDN integration for global playback
+4. ML-based sensitivity classification
+5. Admin audit logs and activity timeline
