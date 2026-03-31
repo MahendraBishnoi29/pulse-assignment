@@ -1,13 +1,75 @@
 import { Response, NextFunction } from 'express';
-import fs from 'fs';
 import * as videoService from '../services/videoService';
+import {
+  buildVideoObjectKey,
+  createSignedUploadUrl,
+} from '../services/s3Service';
+import config from '../config';
 import { startProcessing } from '../workers/videoProcessor';
 import { AuthRequest, VideoFilters } from '../types';
 import AppError from '../utils/AppError';
 
 /**
+ * POST /api/videos/upload-url
+ * Generate presigned S3 upload URL (editor, admin only)
+ */
+export const getUploadUrl = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    if (!req.user) {
+      throw new AppError('Authentication required.', 401);
+    }
+
+    const { filename, mimetype, size } = req.body as {
+      filename?: string;
+      mimetype?: string;
+      size?: number;
+    };
+
+    if (!filename || !mimetype) {
+      throw new AppError('Filename and mimetype are required.', 400);
+    }
+
+    if (!config.ALLOWED_MIMETYPES.includes(mimetype)) {
+      throw new AppError(
+        `Invalid file type: ${mimetype}. Only video files are allowed.`,
+        400
+      );
+    }
+
+    if (typeof size !== 'number' || size <= 0) {
+      throw new AppError('File size is required.', 400);
+    }
+
+    if (size > config.MAX_FILE_SIZE) {
+      throw new AppError('Video exceeds 500MB upload limit.', 400);
+    }
+
+    const objectKey = buildVideoObjectKey(req.user.userId, filename);
+    const { uploadUrl, expiresIn } = await createSignedUploadUrl(
+      objectKey,
+      mimetype
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        uploadUrl,
+        objectKey,
+        expiresIn,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * POST /api/videos
- * Upload a video (editor, admin only)
+ * Save uploaded S3 object metadata and start processing
  */
 export const uploadVideo = async (
   req: AuthRequest,
@@ -19,23 +81,50 @@ export const uploadVideo = async (
       throw new AppError('Authentication required.', 401);
     }
 
-    if (!req.file) {
-      throw new AppError('No video file provided.', 400);
-    }
-
-    const { title, description } = req.body;
+    const { title, description, objectKey, originalName, mimetype, size } =
+      req.body as {
+        title?: string;
+        description?: string;
+        objectKey?: string;
+        originalName?: string;
+        mimetype?: string;
+        size?: number;
+      };
 
     if (!title || title.trim() === '') {
-      // Clean up uploaded file if validation fails
-      fs.unlinkSync(req.file.path);
       throw new AppError('Video title is required.', 400);
     }
 
+    if (!objectKey || !originalName || !mimetype || typeof size !== 'number') {
+      throw new AppError('Upload metadata is incomplete.', 400);
+    }
+
+    if (!objectKey.startsWith(`videos/${req.user.userId}/`)) {
+      throw new AppError('Invalid upload object key.', 400);
+    }
+
+    if (!config.ALLOWED_MIMETYPES.includes(mimetype)) {
+      throw new AppError(
+        `Invalid file type: ${mimetype}. Only video files are allowed.`,
+        400
+      );
+    }
+
+    if (size <= 0 || size > config.MAX_FILE_SIZE) {
+      throw new AppError('Invalid file size.', 400);
+    }
+
+    await videoService.ensureUploadedVideoExists(objectKey, size);
+
     // Create video record
-    const video = await videoService.createVideo(req.file, req.user.userId, {
-      title: title.trim(),
-      description: description?.trim(),
-    });
+    const video = await videoService.createVideo(
+      { key: objectKey, originalName, mimetype, size },
+      req.user.userId,
+      {
+        title: title.trim(),
+        description: description?.trim(),
+      }
+    );
 
     // Trigger background processing
     startProcessing(video._id.toString());
@@ -118,7 +207,7 @@ export const getVideo = async (
 
 /**
  * GET /api/videos/:id/stream
- * Stream video with HTTP range requests (206 Partial Content)
+ * Redirect to signed S3 URL for secure streaming
  */
 export const streamVideo = async (
   req: AuthRequest,
@@ -136,54 +225,11 @@ export const streamVideo = async (
       req.user.role
     );
 
-    const videoPath = video.path;
+    const streamUrl = await videoService.getSignedStreamUrl(video.path);
 
-    // Verify file exists
-    if (!fs.existsSync(videoPath)) {
-      throw new AppError('Video file not found on disk.', 404);
-    }
-
-    const stat = fs.statSync(videoPath);
-    const fileSize = stat.size;
-    const range = req.headers.range;
-
-    if (range) {
-      // ── Range request (206 Partial Content) ─────────────────
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-      // Validate range
-      if (start >= fileSize) {
-        res.status(416).set({
-          'Content-Range': `bytes */${fileSize}`,
-        });
-        res.end();
-        return;
-      }
-
-      const chunkSize = end - start + 1;
-      const stream = fs.createReadStream(videoPath, { start, end });
-
-      res.status(206).set({
-        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': chunkSize.toString(),
-        'Content-Type': video.mimetype,
-      });
-
-      stream.pipe(res);
-    } else {
-      // ── Full file request (200 OK) ──────────────────────────
-      res.status(200).set({
-        'Content-Length': fileSize.toString(),
-        'Content-Type': video.mimetype,
-        'Accept-Ranges': 'bytes',
-      });
-
-      const stream = fs.createReadStream(videoPath);
-      stream.pipe(res);
-    }
+    // Do not cache short-lived signed URLs.
+    res.set('Cache-Control', 'no-store');
+    res.redirect(302, streamUrl);
   } catch (error) {
     next(error);
   }

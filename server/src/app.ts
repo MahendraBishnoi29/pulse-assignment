@@ -10,7 +10,11 @@ import logger from './utils/logger';
 const app = express();
 
 // ─── Security ────────────────────────────────────────────────
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 
 // ─── CORS — open for all origins ────────────────────────────
 app.use(

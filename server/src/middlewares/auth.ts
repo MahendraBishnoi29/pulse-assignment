@@ -6,6 +6,7 @@ import { AuthRequest, JwtPayload, UserRole } from '../types';
 
 /**
  * Authenticate middleware — verifies JWT from Authorization header
+ * (or `token` query param for media streaming endpoints)
  * and attaches decoded user payload to req.user
  */
 export const authenticate = (
@@ -15,15 +16,19 @@ export const authenticate = (
 ): void => {
   try {
     const authHeader = req.headers.authorization;
+    const queryToken =
+      typeof req.query.token === 'string' ? req.query.token : undefined;
+    const allowQueryToken = req.path.endsWith('/stream');
+    let token: string | undefined;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AppError('Access denied. No token provided.', 401);
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    } else if (allowQueryToken && queryToken) {
+      token = queryToken;
     }
 
-    const token = authHeader.split(' ')[1];
-
     if (!token) {
-      throw new AppError('Access denied. Invalid token format.', 401);
+      throw new AppError('Access denied. No token provided.', 401);
     }
 
     const decoded = jwt.verify(token, config.JWT_SECRET) as JwtPayload;

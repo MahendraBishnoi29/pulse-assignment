@@ -1,25 +1,31 @@
-import fs from 'fs';
+import path from 'path';
 import Video from '../models/Video';
 import AppError from '../utils/AppError';
 import logger from '../utils/logger';
 import { IVideo, VideoFilters, UserRole } from '../types';
+import { assertObjectExists, createSignedDownloadUrl, deleteObject } from './s3Service';
 
 /**
- * Create a new video record after file upload
+ * Create a new video record after S3 upload
  */
 export const createVideo = async (
-  file: Express.Multer.File,
+  file: {
+    key: string;
+    originalName: string;
+    mimetype: string;
+    size: number;
+  },
   userId: string,
   metadata: { title: string; description?: string }
 ): Promise<IVideo> => {
   const video = await Video.create({
     title: metadata.title,
     description: metadata.description || '',
-    filename: file.filename,
-    originalName: file.originalname,
+    filename: path.basename(file.key),
+    originalName: file.originalName,
     mimetype: file.mimetype,
     size: file.size,
-    path: file.path,
+    path: file.key,
     userId,
     status: 'pending',
     processingProgress: 0,
@@ -123,14 +129,12 @@ export const deleteVideo = async (
     throw new AppError('You do not have permission to delete this video.', 403);
   }
 
-  // Delete file from disk
+  // Delete file from S3
   try {
-    if (fs.existsSync(video.path)) {
-      fs.unlinkSync(video.path);
-      logger.info(`Deleted video file: ${video.path}`);
-    }
+    await deleteObject(video.path);
+    logger.info(`Deleted video object from S3: ${video.path}`);
   } catch (err) {
-    logger.error(`Failed to delete video file: ${video.path}`, err);
+    logger.error(`Failed to delete video object from S3: ${video.path}`, err);
   }
 
   // Delete database record
@@ -157,4 +161,15 @@ export const updateVideoStatus = async (
 ): Promise<IVideo | null> => {
   const video = await Video.findByIdAndUpdate(videoId, update, { new: true });
   return video;
+};
+
+export const ensureUploadedVideoExists = async (
+  objectKey: string,
+  expectedSize?: number
+): Promise<void> => {
+  await assertObjectExists(objectKey, expectedSize);
+};
+
+export const getSignedStreamUrl = async (objectKey: string): Promise<string> => {
+  return createSignedDownloadUrl(objectKey);
 };

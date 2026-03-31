@@ -1,18 +1,23 @@
 import { Router } from 'express';
 import * as videoController from '../controllers/videoController';
 import { authenticate, authorize } from '../middlewares/auth';
-import upload from '../middlewares/upload';
 
 const router = Router();
 
 // All video routes require authentication
 router.use(authenticate);
 
-// POST /api/videos — Upload video (editor, admin only)
+// POST /api/videos/upload-url — Generate signed upload URL (editor, admin only)
+router.post(
+  '/upload-url',
+  authorize('editor', 'admin'),
+  videoController.getUploadUrl
+);
+
+// POST /api/videos — Save uploaded metadata (editor, admin only)
 router.post(
   '/',
   authorize('editor', 'admin'),
-  upload.single('video'),
   videoController.uploadVideo
 );
 

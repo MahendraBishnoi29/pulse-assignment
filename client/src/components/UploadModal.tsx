@@ -63,8 +63,10 @@ export default function UploadModal({ isOpen, onClose, onSuccess }: UploadModalP
       onSuccess();
       onClose();
     } catch (err) {
-      const error = err as AxiosError<{message: string}>;
-      toast(error.response?.data?.message || "Upload failed", "error");
+      const error = err as AxiosError<{ message?: string }>;
+      const message =
+        error.response?.data?.message || error.message || "Upload failed";
+      toast(message, "error");
     } finally {
       setIsUploading(false);
       setProgress(0);

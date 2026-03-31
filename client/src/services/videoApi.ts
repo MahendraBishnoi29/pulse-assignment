@@ -1,4 +1,6 @@
 import api, { API_BASE_URL } from "./api";
+import axios from "axios";
+import type { AxiosError } from "axios";
 import type { ApiResponse, PaginatedVideos, Video, VideoFilters } from "../types";
 
 export const getVideos = async (
@@ -27,22 +29,52 @@ export const uploadVideo = async (
   metadata: { title: string; description?: string },
   onProgress?: (progress: number) => void
 ): Promise<ApiResponse<{ video: Video }>> => {
-  const formData = new FormData();
-  formData.append("video", file);
-  formData.append("title", metadata.title);
-  if (metadata.description) {
-    formData.append("description", metadata.description);
+  const uploadUrlRes = await api.post<{
+    success: boolean;
+    data: { uploadUrl: string; objectKey: string; expiresIn: number };
+  }>("/videos/upload-url", {
+    filename: file.name,
+    mimetype: file.type,
+    size: file.size,
+  });
+
+  try {
+    await axios.put(uploadUrlRes.data.data.uploadUrl, file, {
+      headers: { "Content-Type": file.type },
+      onUploadProgress: (event) => {
+        if (event.total && onProgress) {
+          const percent = Math.round((event.loaded * 95) / event.total);
+          onProgress(percent);
+        }
+      },
+    });
+  } catch (error) {
+    const axiosError = error as AxiosError;
+    if (!axiosError.response) {
+      throw new Error(
+        "Direct S3 upload failed. Check bucket CORS for PUT from your frontend origin."
+      );
+    }
+    throw error;
   }
 
-  const res = await api.post("/videos", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-    onUploadProgress: (event) => {
-      if (event.total && onProgress) {
-        const percent = Math.round((event.loaded * 100) / event.total);
-        onProgress(percent);
-      }
-    },
+  if (onProgress) {
+    onProgress(98);
+  }
+
+  const res = await api.post("/videos", {
+    title: metadata.title,
+    description: metadata.description,
+    objectKey: uploadUrlRes.data.data.objectKey,
+    originalName: file.name,
+    mimetype: file.type,
+    size: file.size,
   });
+
+  if (onProgress) {
+    onProgress(100);
+  }
+
   return res.data;
 };
 

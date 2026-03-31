@@ -3,6 +3,7 @@ import ffmpegStatic from 'ffmpeg-static';
 import Video from '../models/Video';
 import logger from '../utils/logger';
 import { SensitivityLabel } from '../types';
+import { createSignedDownloadUrl } from './s3Service';
 
 // Set ffmpeg path to the bundled static binary
 if (ffmpegStatic) {
@@ -59,11 +60,11 @@ const emitProgress = (
 };
 
 /**
- * Probe video file to extract metadata using ffmpeg
+ * Probe video to extract metadata using ffmpeg
  */
-const probeVideo = (filePath: string): Promise<VideoProbeResult> => {
+const probeVideo = (source: string): Promise<VideoProbeResult> => {
   return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(filePath, (err: any, metadata: any) => {
+    ffmpeg.ffprobe(source, (err: any, metadata: any) => {
       if (err) {
         logger.error('ffprobe error:', err);
         return reject(err);
@@ -181,7 +182,8 @@ export const processVideo = async (videoId: string): Promise<void> => {
 
     let probeResult: VideoProbeResult;
     try {
-      probeResult = await probeVideo(video.path);
+      const signedProbeUrl = await createSignedDownloadUrl(video.path, 1800);
+      probeResult = await probeVideo(signedProbeUrl);
     } catch (probeErr) {
       // If ffprobe fails, use fallback values
       logger.warn(`ffprobe failed for ${videoId}, using fallback values`);

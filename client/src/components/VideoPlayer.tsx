@@ -40,7 +40,6 @@ export default function VideoPlayer({ streamUrl, isFlagged }: VideoPlayerProps) 
         className="w-full h-full object-contain"
         src={streamUrl}
         controlsList="nodownload"
-        crossOrigin="anonymous"
       >
         <p>Your browser doesn't support HTML video.</p>
       </video>
