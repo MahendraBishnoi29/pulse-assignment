@@ -9,7 +9,7 @@ export default function RegisterPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("viewer");
+  const [role] = useState("editor");
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const { register, isAuthenticated } = useAuth();
@@ -101,22 +101,6 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1" htmlFor="role">
-                Account Role
-              </label>
-              <select
-                id="role"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                className="block w-full px-3 py-2.5 border border-zinc-700 bg-zinc-950 rounded-lg text-zinc-100 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 sm:text-sm transition-colors appearance-none cursor-pointer"
-              >
-                <option value="viewer">Viewer (Read-only)</option>
-                <option value="editor">Editor (Upload & Manage)</option>
-                <option value="admin">Admin (Full Access)</option>
-              </select>
             </div>
           </div>
 

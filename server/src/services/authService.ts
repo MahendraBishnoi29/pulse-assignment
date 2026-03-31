@@ -40,7 +40,7 @@ export const register = async (data: {
     email: data.email,
     password: data.password,
     name: data.name,
-    role: data.role || 'viewer',
+    role: data.role || 'editor',
     organisation: data.organisation || 'default',
   });
 
