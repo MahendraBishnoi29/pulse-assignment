@@ -9,6 +9,9 @@ import logger from './utils/logger';
 
 const app = express();
 
+// Behind Railway/Reverse proxies
+app.set('trust proxy', 1);
+
 // ─── Security ────────────────────────────────────────────────
 app.use(
   helmet({
