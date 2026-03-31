@@ -167,9 +167,21 @@ export const getVideos = async (
       filters
     );
 
+    const videosWithThumbnails = await Promise.all(
+      result.videos.map(async (video) => {
+        const thumbnailUrl = video.thumbnailKey
+          ? await videoService.getSignedThumbnailUrl(video.thumbnailKey)
+          : undefined;
+        return { ...video, thumbnailUrl };
+      })
+    );
+
     res.status(200).json({
       success: true,
-      data: result,
+      data: {
+        ...result,
+        videos: videosWithThumbnails,
+      },
     });
   } catch (error) {
     next(error);
@@ -196,9 +208,13 @@ export const getVideo = async (
       req.user.role
     );
 
+    const thumbnailUrl = video.thumbnailKey
+      ? await videoService.getSignedThumbnailUrl(video.thumbnailKey)
+      : undefined;
+
     res.status(200).json({
       success: true,
-      data: { video },
+      data: { video: { ...video.toObject(), thumbnailUrl } },
     });
   } catch (error) {
     next(error);

@@ -7,6 +7,8 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import fs from 'fs';
+import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
 import config from '../config';
 import AppError from '../utils/AppError';
@@ -65,6 +67,10 @@ export const buildVideoObjectKey = (
   return `videos/${userId}/${uuidv4()}-${base}${safeExt}`;
 };
 
+export const buildThumbnailKey = (userId: string, videoId: string): string => {
+  return `videos/${userId}/${videoId}-thumb.jpg`;
+};
+
 export const createSignedUploadUrl = async (
   objectKey: string,
   mimetype: string
@@ -97,6 +103,42 @@ export const createSignedDownloadUrl = async (
   });
 
   return getSignedUrl(client, command, { expiresIn });
+};
+
+export const uploadBuffer = async (
+  objectKey: string,
+  body: Buffer,
+  contentType: string
+): Promise<void> => {
+  const client = createS3Client();
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: config.AWS_S3_BUCKET,
+      Key: objectKey,
+      Body: body,
+      ContentType: contentType,
+    })
+  );
+};
+
+export const downloadObjectToFile = async (
+  objectKey: string,
+  filePath: string
+): Promise<void> => {
+  const client = createS3Client();
+  const result = await client.send(
+    new GetObjectCommand({
+      Bucket: config.AWS_S3_BUCKET,
+      Key: objectKey,
+    })
+  );
+
+  if (!result.Body || typeof (result.Body as any).pipe !== 'function') {
+    throw new AppError('Unable to download object from S3.', 500);
+  }
+
+  await pipeline(result.Body as NodeJS.ReadableStream, fs.createWriteStream(filePath));
 };
 
 export const assertObjectExists = async (

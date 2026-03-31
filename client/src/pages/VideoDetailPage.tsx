@@ -106,6 +106,7 @@ export default function VideoDetailPage() {
           <VideoPlayer
             streamUrl={videoApi.getStreamUrl(video._id)}
             isFlagged={video.sensitivityLabel === "flagged"}
+            posterUrl={video.thumbnailUrl}
           />
         ) : (
           <div className="w-full aspect-video bg-zinc-900 border border-zinc-800 rounded-xl flex flex-col justify-center items-center text-center p-6 shadow-xl">

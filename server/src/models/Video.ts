@@ -43,6 +43,10 @@ const videoSchema = new Schema<IVideo>(
       type: String,
       required: true,
     },
+    thumbnailKey: {
+      type: String,
+      default: '',
+    },
     userId: {
       type: Schema.Types.ObjectId,
       ref: 'User',

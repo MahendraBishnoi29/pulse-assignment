@@ -24,6 +24,10 @@ const config = {
     process.env.S3_STREAM_URL_EXPIRES_IN || '900',
     10
   ),
+  S3_THUMBNAIL_URL_EXPIRES_IN: parseInt(
+    process.env.S3_THUMBNAIL_URL_EXPIRES_IN || '86400',
+    10
+  ),
   MAX_FILE_SIZE: 500 * 1024 * 1024, // 500MB
   ALLOWED_MIMETYPES: [
     'video/mp4',

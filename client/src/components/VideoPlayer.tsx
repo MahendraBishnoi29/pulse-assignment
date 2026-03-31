@@ -4,9 +4,14 @@ import { AlertCircle } from "lucide-react";
 interface VideoPlayerProps {
   streamUrl: string;
   isFlagged?: boolean;
+  posterUrl?: string;
 }
 
-export default function VideoPlayer({ streamUrl, isFlagged }: VideoPlayerProps) {
+export default function VideoPlayer({
+  streamUrl,
+  isFlagged,
+  posterUrl,
+}: VideoPlayerProps) {
   const [showWarning, setShowWarning] = useState(isFlagged);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -39,6 +44,7 @@ export default function VideoPlayer({ streamUrl, isFlagged }: VideoPlayerProps) 
         controls
         className="w-full h-full object-contain"
         src={streamUrl}
+        poster={posterUrl}
         controlsList="nodownload"
       >
         <p>Your browser doesn't support HTML video.</p>

@@ -4,6 +4,7 @@ import AppError from '../utils/AppError';
 import logger from '../utils/logger';
 import { IVideo, VideoFilters, UserRole } from '../types';
 import { assertObjectExists, createSignedDownloadUrl, deleteObject } from './s3Service';
+import config from '../config';
 
 /**
  * Create a new video record after S3 upload
@@ -172,4 +173,10 @@ export const ensureUploadedVideoExists = async (
 
 export const getSignedStreamUrl = async (objectKey: string): Promise<string> => {
   return createSignedDownloadUrl(objectKey);
+};
+
+export const getSignedThumbnailUrl = async (
+  objectKey: string
+): Promise<string> => {
+  return createSignedDownloadUrl(objectKey, config.S3_THUMBNAIL_URL_EXPIRES_IN);
 };

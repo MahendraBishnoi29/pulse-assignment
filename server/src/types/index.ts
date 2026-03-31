@@ -33,6 +33,7 @@ export interface IVideo extends Document {
   duration: number;
   resolution: string;
   path: string;
+  thumbnailKey?: string;
   userId: Types.ObjectId;
   status: VideoStatus;
   sensitivityScore: number;

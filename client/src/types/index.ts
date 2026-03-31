@@ -33,6 +33,8 @@ export interface Video {
   duration: number;
   resolution: string;
   path: string;
+  thumbnailKey?: string;
+  thumbnailUrl?: string;
   userId: string;
   status: VideoStatus;
   sensitivityScore: number;

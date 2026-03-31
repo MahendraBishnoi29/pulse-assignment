@@ -19,6 +19,17 @@ export default function VideoCard({ video }: { video: Video }) {
       className="group flex flex-col bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg hover:shadow-black/40 focus-ring"
     >
       <div className="relative aspect-video bg-zinc-950 flex flex-col items-center justify-center">
+        {video.thumbnailUrl ? (
+          <img
+            src={video.thumbnailUrl}
+            alt={`${video.title} thumbnail`}
+            className="absolute inset-0 h-full w-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950" />
+        )}
+
         {video.status === "processed" ? (
           <div className="absolute inset-0 flex items-center justify-center group-hover:bg-zinc-900/20 transition-colors">
              <PlayCircle className={`w-12 h-12 transition-colors ${video.sensitivityLabel === 'flagged' ? 'text-rose-500/50 group-hover:text-rose-500' : 'text-zinc-600 group-hover:text-emerald-500'}`} />

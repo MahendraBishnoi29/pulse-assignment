@@ -1,13 +1,25 @@
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegStatic from 'ffmpeg-static';
+import ffprobeStatic from 'ffprobe-static';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import Video from '../models/Video';
 import logger from '../utils/logger';
 import { SensitivityLabel } from '../types';
-import { createSignedDownloadUrl } from './s3Service';
+import {
+  buildThumbnailKey,
+  createSignedDownloadUrl,
+  downloadObjectToFile,
+  uploadBuffer,
+} from './s3Service';
 
 // Set ffmpeg path to the bundled static binary
 if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic);
+}
+if (ffprobeStatic?.path) {
+  ffmpeg.setFfprobePath(ffprobeStatic.path);
 }
 
 // ─── Types ──────────────────────────────────────────────────
@@ -85,6 +97,20 @@ const probeVideo = (source: string): Promise<VideoProbeResult> => {
         bitrate: Math.round((metadata.format.bit_rate || 0) / 1000), // kbps
       });
     });
+  });
+};
+
+const generateThumbnail = (
+  source: string,
+  outputPath: string
+): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    ffmpeg(source)
+      .outputOptions(['-y', '-ss 00:00:01', '-frames:v 1', '-vf scale=640:-1'])
+      .output(outputPath)
+      .on('end', () => resolve())
+      .on('error', (err) => reject(err))
+      .run();
   });
 };
 
@@ -180,10 +206,11 @@ export const processVideo = async (videoId: string): Promise<void> => {
     await delay(800);
     emitProgress(userId, videoId, 20, 'processing', 'Extracting video metadata...');
 
+    const signedSourceUrl = await createSignedDownloadUrl(video.path, 1800);
+
     let probeResult: VideoProbeResult;
     try {
-      const signedProbeUrl = await createSignedDownloadUrl(video.path, 1800);
-      probeResult = await probeVideo(signedProbeUrl);
+      probeResult = await probeVideo(signedSourceUrl);
     } catch (probeErr) {
       // If ffprobe fails, use fallback values
       logger.warn(`ffprobe failed for ${videoId}, using fallback values`);
@@ -195,6 +222,31 @@ export const processVideo = async (videoId: string): Promise<void> => {
         codec: 'unknown',
         bitrate: 0,
       };
+    }
+
+    // Generate thumbnail frame and upload to S3 (independent of ffprobe)
+    const thumbnailKey = buildThumbnailKey(userId, videoId);
+    const thumbnailPath = path.join(os.tmpdir(), `${videoId}-thumb.jpg`);
+    const fallbackVideoPath = path.join(os.tmpdir(), `${videoId}-source.mp4`);
+    try {
+      try {
+        await generateThumbnail(signedSourceUrl, thumbnailPath);
+      } catch (remoteErr) {
+        logger.warn(
+          `Remote thumbnail failed for ${videoId}, attempting local download`,
+          remoteErr
+        );
+        await downloadObjectToFile(video.path, fallbackVideoPath);
+        await generateThumbnail(fallbackVideoPath, thumbnailPath);
+      }
+      const buffer = await fs.readFile(thumbnailPath);
+      await uploadBuffer(thumbnailKey, buffer, 'image/jpeg');
+      await Video.findByIdAndUpdate(videoId, { thumbnailKey });
+    } catch (thumbErr) {
+      logger.warn(`Thumbnail generation failed for ${videoId}`, thumbErr);
+    } finally {
+      await fs.unlink(thumbnailPath).catch(() => undefined);
+      await fs.unlink(fallbackVideoPath).catch(() => undefined);
     }
 
     await Video.findByIdAndUpdate(videoId, {
